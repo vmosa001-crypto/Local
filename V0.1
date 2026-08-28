@@ -1,0 +1,427 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+-- ==========================================
+-- KONFIGURASI DEFAULT (Sesuai Request)
+-- ==========================================
+local defaultLerpSpeed = 1    -- 1 = Instant TP Delta, < 1 = Smooth TP
+local attackDelay = 0.05      -- Delay spam attack & skill
+local defaultSpeedHeight = -15 -- Ketinggian default di-set -15
+local burstCount = 5          -- Jumlah hit per eksekusi
+-- ==========================================
+
+-- ==========================================
+-- 1. BIKIN GUI (Sistem Bypass gethui)
+-- ==========================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AutoFarm_UltimateAll_GUI"
+ScreenGui.ResetOnSpawn = false
+
+local success, hui = pcall(function() return gethui() end)
+if success and hui then
+    ScreenGui.Parent = hui
+else
+    local success2, core = pcall(function() return game:GetService("CoreGui") end)
+    if success2 and core then
+        ScreenGui.Parent = core
+    else
+        ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    end
+end
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 220, 0, 255) -- Diperbesar sedikit karena nambah tombol Refresh
+MainFrame.Position = UDim2.new(0.5, -110, 0.5, -127)
+MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true 
+MainFrame.Parent = ScreenGui
+
+-- Tombol Farm (Default ON)
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(1, -20, 0, 35)
+ToggleBtn.Position = UDim2.new(0, 10, 0, 10)
+ToggleBtn.Text = "FARM: ON"
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.Font = Enum.Font.GothamBold
+ToggleBtn.TextSize = 14
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+ToggleBtn.Parent = MainFrame
+
+-- Tombol Dropdown
+local DropdownBtn = Instance.new("TextButton")
+DropdownBtn.Size = UDim2.new(1, -55, 0, 35) -- Dikecilin dikit biar muat tombol Refresh
+DropdownBtn.Position = UDim2.new(0, 10, 0, 50)
+DropdownBtn.Text = "Target: ALL"
+DropdownBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+DropdownBtn.Font = Enum.Font.GothamSemibold
+DropdownBtn.TextSize = 13
+DropdownBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+DropdownBtn.Parent = MainFrame
+
+-- TOMBOL REFRESH BARU
+local RefreshBtn = Instance.new("TextButton")
+RefreshBtn.Size = UDim2.new(0, 35, 0, 35)
+RefreshBtn.Position = UDim2.new(1, -45, 0, 50)
+RefreshBtn.Text = "🔄"
+RefreshBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+RefreshBtn.Font = Enum.Font.GothamBold
+RefreshBtn.TextSize = 16
+RefreshBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 120)
+RefreshBtn.Parent = MainFrame
+
+-- TextBox Ketinggian (Default -15)
+local HeightInput = Instance.new("TextBox")
+HeightInput.Size = UDim2.new(1, -20, 0, 35)
+HeightInput.Position = UDim2.new(0, 10, 0, 90)
+HeightInput.Text = tostring(defaultSpeedHeight)
+HeightInput.PlaceholderText = "Ketinggian (Height)..."
+HeightInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+HeightInput.Font = Enum.Font.Gotham
+HeightInput.TextSize = 13
+HeightInput.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+HeightInput.ClearTextOnFocus = false
+HeightInput.Parent = MainFrame
+
+-- TextBox Speed Lerp
+local SpeedInput = Instance.new("TextBox")
+SpeedInput.Size = UDim2.new(1, -20, 0, 35)
+SpeedInput.Position = UDim2.new(0, 10, 0, 130)
+SpeedInput.Text = tostring(defaultLerpSpeed)
+SpeedInput.PlaceholderText = "TP Speed (1 = Instant)"
+SpeedInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedInput.Font = Enum.Font.Gotham
+SpeedInput.TextSize = 13
+SpeedInput.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+SpeedInput.ClearTextOnFocus = false
+SpeedInput.Parent = MainFrame
+
+-- Tombol Auto Skill (Default ON)
+local AutoSkillBtn = Instance.new("TextButton")
+AutoSkillBtn.Size = UDim2.new(1, -20, 0, 35)
+AutoSkillBtn.Position = UDim2.new(0, 10, 0, 170)
+AutoSkillBtn.Text = "AUTO SKILL: ON"
+AutoSkillBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+AutoSkillBtn.Font = Enum.Font.GothamBold
+AutoSkillBtn.TextSize = 14
+AutoSkillBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+AutoSkillBtn.Parent = MainFrame
+
+-- List Dropdown
+local DropdownList = Instance.new("ScrollingFrame")
+DropdownList.Size = UDim2.new(1, -20, 0, 120)
+DropdownList.Position = UDim2.new(0, 10, 0, 215)
+DropdownList.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+DropdownList.BorderSizePixel = 0
+DropdownList.ScrollBarThickness = 5
+DropdownList.Visible = false
+DropdownList.Parent = MainFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Parent = DropdownList
+
+-- ==========================================
+-- 2. VARIABEL & LOGIC GAME (Default ON & ALL)
+-- ==========================================
+local isFarming = true       -- Default langsung ON
+local isAutoSkill = true     -- Default langsung ON
+local selectedEnemyName = "ALL" -- Default langsung ALL
+local noclipConnection = nil
+local movementConnection = nil
+
+-- Cari Folder Musuh Dinamis
+local function getEnemiesFolder()
+    for _, folder in ipairs(workspace:GetChildren()) do
+        if string.find(folder.Name, "Generated_") and folder:FindFirstChild("NPCs") then
+            return folder.NPCs
+        end
+    end
+    return nil
+end
+
+-- Ambil Remote Attack
+local function getCombatRemote()
+    local playerFolder = ReplicatedStorage:FindFirstChild("Player")
+    if playerFolder then
+        local remotes = playerFolder:FindFirstChild("Remotes")
+        if remotes then
+            local inputs = remotes:FindFirstChild("Inputs")
+            if inputs then
+                return inputs:FindFirstChild("Attack")
+            end
+        end
+    end
+    return nil
+end
+
+-- Ambil Remote Skill
+local function getSkillRemote()
+    local playerFolder = ReplicatedStorage:FindFirstChild("Player")
+    if playerFolder then
+        local remotes = playerFolder:FindFirstChild("Remotes")
+        if remotes then
+            local inputs = remotes:FindFirstChild("Inputs")
+            if inputs then
+                return inputs:FindFirstChild("Skill")
+            end
+        end
+    end
+    return nil
+end
+
+-- ANTI FISIKA & ANTI TARIK
+local function setupAntiPhysics(char, status)
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+    
+    local oldBV = hrp:FindFirstChild("AntiFall_BV")
+    if oldBV then oldBV:Destroy() end
+
+    if status then
+        local bv = Instance.new("BodyVelocity")
+        bv.Name = "AntiFall_BV"
+        bv.Velocity = Vector3.new(0, 0, 0)
+        bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        bv.Parent = hrp
+        
+        if noclipConnection then noclipConnection:Disconnect() end
+        noclipConnection = RunService.Stepped:Connect(function()
+            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+            
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end)
+    else
+        if noclipConnection then
+            noclipConnection:Disconnect()
+            noclipConnection = nil
+        end
+        for _, part in pairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+            end
+        end
+    end
+end
+
+-- CARI TARGET HIDUP
+local function getAliveTarget()
+    local targetFolder = getEnemiesFolder()
+    if targetFolder then
+        for _, enemy in ipairs(targetFolder:GetChildren()) do
+            if enemy:IsA("Model") and enemy:FindFirstChild("HumanoidRootPart") then
+                if selectedEnemyName == "ALL" or enemy.Name == selectedEnemyName then
+                    local humanoid = enemy:FindFirstChildOfClass("Humanoid")
+                    if not humanoid or humanoid.Health > 0 then
+                        return enemy
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- MOVEMENT LOOP
+local function startMovementLoop()
+    if movementConnection then movementConnection:Disconnect() end
+    
+    movementConnection = RunService.Heartbeat:Connect(function()
+        if isFarming and selectedEnemyName then
+            local char = LocalPlayer.Character
+            local targetEnemy = getAliveTarget()
+            
+            if char and char:FindFirstChild("HumanoidRootPart") and targetEnemy then
+                local myHRP = char.HumanoidRootPart
+                local targetHRP = targetEnemy:FindFirstChild("HumanoidRootPart")
+                
+                if targetHRP then
+                    local currentHeight = tonumber(HeightInput.Text) or defaultSpeedHeight
+                    local currentLerpSpeed = tonumber(SpeedInput.Text) or defaultLerpSpeed
+                    currentLerpSpeed = math.clamp(currentLerpSpeed, 0.001, 1)
+                    
+                    local targetPos = targetHRP.Position + Vector3.new(0, currentHeight, 0)
+                    local goalCFrame = CFrame.new(targetPos, targetHRP.Position)
+                    
+                    if currentLerpSpeed >= 1 then
+                        char:PivotTo(goalCFrame)
+                    else
+                        myHRP.CFrame = myHRP.CFrame:Lerp(goalCFrame, currentLerpSpeed)
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function stopMovementLoop()
+    if movementConnection then
+        movementConnection:Disconnect()
+        movementConnection = nil
+    end
+end
+
+-- ATTACK & AUTO SKILL LOOP
+task.spawn(function()
+    while true do
+        if isFarming and selectedEnemyName then
+            local targetEnemy = getAliveTarget()
+            local combatRemote = getCombatRemote()
+            local skillRemote = getSkillRemote()
+            local char = LocalPlayer.Character
+            
+            if targetEnemy and char then
+                local myHRP = char:FindFirstChild("HumanoidRootPart")
+                local targetHRP = targetEnemy:FindFirstChild("HumanoidRootPart")
+                
+                if myHRP and targetHRP then
+                    local direction = (targetHRP.Position - myHRP.Position).Unit
+                    
+                    pcall(function()
+                        if combatRemote then
+                            for i = 1, burstCount do
+                                combatRemote:FireServer(direction.X, 0, direction.Z)
+                            end
+                        end
+                        
+                        if isAutoSkill and skillRemote then
+                            for skillNum = 1, 4 do
+                                skillRemote:FireServer(skillNum, "tap", 0, 0, 0)
+                            end
+                        end
+                    end)
+                end
+            end
+        end
+        task.wait(attackDelay)
+    end
+end)
+
+-- UI LOGIC: REFRESH DROPDOWN
+local function refreshDropdown()
+    for _, child in pairs(DropdownList:GetChildren()) do
+        if child:IsA("TextButton") then child:Destroy() end
+    end
+    
+    local ySize = 0
+    
+    local allBtn = Instance.new("TextButton")
+    allBtn.Size = UDim2.new(1, 0, 0, 30)
+    allBtn.Text = " [ ALL ENEMIES ]"
+    allBtn.TextXAlignment = Enum.TextXAlignment.Left
+    allBtn.TextColor3 = Color3.fromRGB(255, 235, 59)
+    allBtn.Font = Enum.Font.GothamBold
+    allBtn.TextSize = 13
+    allBtn.BackgroundColor3 = Color3.fromRGB(70, 70, 30)
+    allBtn.Parent = DropdownList
+    
+    allBtn.MouseButton1Click:Connect(function()
+        selectedEnemyName = "ALL"
+        DropdownBtn.Text = "Target: ALL"
+        DropdownList.Visible = false
+        MainFrame.Size = UDim2.new(0, 220, 0, 255)
+    end)
+    ySize = ySize + 30
+    
+    local uniqueEnemies = {}
+    local targetFolder = getEnemiesFolder()
+    
+    if targetFolder then
+        for _, enemy in ipairs(targetFolder:GetChildren()) do
+            if enemy:IsA("Model") and enemy:FindFirstChild("HumanoidRootPart") then
+                if not uniqueEnemies[enemy.Name] then
+                    uniqueEnemies[enemy.Name] = true
+                    
+                    local pBtn = Instance.new("TextButton")
+                    pBtn.Size = UDim2.new(1, 0, 0, 30)
+                    pBtn.Text = " " .. enemy.Name
+                    pBtn.TextXAlignment = Enum.TextXAlignment.Left
+                    pBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    pBtn.Font = Enum.Font.Gotham
+                    pBtn.TextSize = 13
+                    pBtn.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+                    pBtn.Parent = DropdownList
+                    
+                    pBtn.MouseButton1Click:Connect(function()
+                        selectedEnemyName = enemy.Name
+                        DropdownBtn.Text = "Target: " .. enemy.Name
+                        DropdownList.Visible = false
+                        MainFrame.Size = UDim2.new(0, 220, 0, 255)
+                    end)
+                    ySize = ySize + 30
+                end
+            end
+        end
+    end
+    
+    DropdownList.CanvasSize = UDim2.new(0, 0, 0, ySize)
+end
+
+DropdownBtn.MouseButton1Click:Connect(function()
+    DropdownList.Visible = not DropdownList.Visible
+    if DropdownList.Visible then 
+        MainFrame.Size = UDim2.new(0, 220, 0, 375)
+        refreshDropdown() 
+    else
+        MainFrame.Size = UDim2.new(0, 220, 0, 255)
+    end
+end)
+
+-- Tombol Refresh List
+RefreshBtn.MouseButton1Click:Connect(function()
+    refreshDropdown()
+    RefreshBtn.Text = "✔"
+    task.wait(0.5)
+    RefreshBtn.Text = "🔄"
+end)
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    isFarming = not isFarming
+    setupAntiPhysics(LocalPlayer.Character, isFarming)
+
+    if isFarming then
+        ToggleBtn.Text = "FARM: ON"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        startMovementLoop()
+    else
+        ToggleBtn.Text = "FARM: OFF"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        stopMovementLoop()
+    end
+end)
+
+AutoSkillBtn.MouseButton1Click:Connect(function()
+    isAutoSkill = not isAutoSkill
+    if isAutoSkill then
+        AutoSkillBtn.Text = "AUTO SKILL: ON"
+        AutoSkillBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+    else
+        AutoSkillBtn.Text = "AUTO SKILL: OFF"
+        AutoSkillBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    end
+end)
+
+-- AUTO JALANKAN SAAT SCRIPT DI-EXECUTE
+task.spawn(function()
+    task.wait(1)
+    setupAntiPhysics(LocalPlayer.Character, true)
+    startMovementLoop()
+end)
+
+-- RESET ANTI FISIKA JIKA MATI
+LocalPlayer.CharacterAdded:Connect(function(char)
+    if isFarming then
+        task.wait(1) 
+        setupAntiPhysics(char, true)
+    end
+end)
