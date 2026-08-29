@@ -4,19 +4,20 @@ local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
 -- ==========================================
--- KONFIGURASI DEFAULT (Sesuai Request)
+-- KONFIGURASI DEFAULT
 -- ==========================================
 local defaultLerpSpeed = 1    -- 1 = Instant TP Delta, < 1 = Smooth TP
 local attackDelay = 0.05      -- Delay spam attack & skill
-local defaultSpeedHeight = -15 -- Ketinggian default di-set -15
+local defaultSpeedHeight = -15 -- Ketinggian default saat farming musuh
 local burstCount = 5          -- Jumlah hit per eksekusi
+local chestSkipTimeout = 1    -- Timeout blacklist chest 1 detik
 -- ==========================================
 
 -- ==========================================
 -- 1. BIKIN GUI (Sistem Bypass gethui)
 -- ==========================================
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "AutoFarm_UltimateAll_GUI"
+ScreenGui.Name = "AutoFarm_FinalPerfect_GUI"
 ScreenGui.ResetOnSpawn = false
 
 local success, hui = pcall(function() return gethui() end)
@@ -33,15 +34,14 @@ end
 
 -- Main Frame
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 220, 0, 255) -- Diperbesar sedikit karena nambah tombol Refresh
-MainFrame.Position = UDim2.new(0.5, -110, 0.5, -127)
+MainFrame.Size = UDim2.new(0, 220, 0, 295)
+MainFrame.Position = UDim2.new(0.5, -110, 0.5, -147)
 MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true 
 MainFrame.Parent = ScreenGui
 
--- Tombol Farm (Default ON)
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Size = UDim2.new(1, -20, 0, 35)
 ToggleBtn.Position = UDim2.new(0, 10, 0, 10)
@@ -52,9 +52,8 @@ ToggleBtn.TextSize = 14
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
 ToggleBtn.Parent = MainFrame
 
--- Tombol Dropdown
 local DropdownBtn = Instance.new("TextButton")
-DropdownBtn.Size = UDim2.new(1, -55, 0, 35) -- Dikecilin dikit biar muat tombol Refresh
+DropdownBtn.Size = UDim2.new(1, -55, 0, 35)
 DropdownBtn.Position = UDim2.new(0, 10, 0, 50)
 DropdownBtn.Text = "Target: ALL"
 DropdownBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -63,7 +62,6 @@ DropdownBtn.TextSize = 13
 DropdownBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 DropdownBtn.Parent = MainFrame
 
--- TOMBOL REFRESH BARU
 local RefreshBtn = Instance.new("TextButton")
 RefreshBtn.Size = UDim2.new(0, 35, 0, 35)
 RefreshBtn.Position = UDim2.new(1, -45, 0, 50)
@@ -74,7 +72,6 @@ RefreshBtn.TextSize = 16
 RefreshBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 120)
 RefreshBtn.Parent = MainFrame
 
--- TextBox Ketinggian (Default -15)
 local HeightInput = Instance.new("TextBox")
 HeightInput.Size = UDim2.new(1, -20, 0, 35)
 HeightInput.Position = UDim2.new(0, 10, 0, 90)
@@ -87,7 +84,6 @@ HeightInput.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 HeightInput.ClearTextOnFocus = false
 HeightInput.Parent = MainFrame
 
--- TextBox Speed Lerp
 local SpeedInput = Instance.new("TextBox")
 SpeedInput.Size = UDim2.new(1, -20, 0, 35)
 SpeedInput.Position = UDim2.new(0, 10, 0, 130)
@@ -100,7 +96,6 @@ SpeedInput.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 SpeedInput.ClearTextOnFocus = false
 SpeedInput.Parent = MainFrame
 
--- Tombol Auto Skill (Default ON)
 local AutoSkillBtn = Instance.new("TextButton")
 AutoSkillBtn.Size = UDim2.new(1, -20, 0, 35)
 AutoSkillBtn.Position = UDim2.new(0, 10, 0, 170)
@@ -111,10 +106,19 @@ AutoSkillBtn.TextSize = 14
 AutoSkillBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
 AutoSkillBtn.Parent = MainFrame
 
--- List Dropdown
+local AutoChestBtn = Instance.new("TextButton")
+AutoChestBtn.Size = UDim2.new(1, -20, 0, 35)
+AutoChestBtn.Position = UDim2.new(0, 10, 0, 210)
+AutoChestBtn.Text = "AUTO CHEST: ON"
+AutoChestBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+AutoChestBtn.Font = Enum.Font.GothamBold
+AutoChestBtn.TextSize = 14
+AutoChestBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+AutoChestBtn.Parent = MainFrame
+
 local DropdownList = Instance.new("ScrollingFrame")
 DropdownList.Size = UDim2.new(1, -20, 0, 120)
-DropdownList.Position = UDim2.new(0, 10, 0, 215)
+DropdownList.Position = UDim2.new(0, 10, 0, 255)
 DropdownList.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
 DropdownList.BorderSizePixel = 0
 DropdownList.ScrollBarThickness = 5
@@ -126,55 +130,97 @@ UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 UIListLayout.Parent = DropdownList
 
 -- ==========================================
--- 2. VARIABEL & LOGIC GAME (Default ON & ALL)
+-- 2. VARIABEL & LOGIC GAME
 -- ==========================================
-local isFarming = true       -- Default langsung ON
-local isAutoSkill = true     -- Default langsung ON
-local selectedEnemyName = "ALL" -- Default langsung ALL
+local isFarming = true       
+local isAutoSkill = true     
+local isAutoChest = true     
+local selectedEnemyName = "ALL" 
 local noclipConnection = nil
 local movementConnection = nil
 
--- Cari Folder Musuh Dinamis
-local function getEnemiesFolder()
+local skippedChests = {}
+local currentChestTarget = nil
+local chestStuckTimer = 0
+
+local function getMapFolder()
     for _, folder in ipairs(workspace:GetChildren()) do
-        if string.find(folder.Name, "Generated_") and folder:FindFirstChild("NPCs") then
-            return folder.NPCs
+        if string.find(folder.Name, "Generated_") then
+            return folder
         end
     end
     return nil
 end
 
--- Ambil Remote Attack
+local function getEnemiesFolder()
+    local map = getMapFolder()
+    if map and map:FindFirstChild("NPCs") then
+        return map.NPCs
+    end
+    return nil
+end
+
+local function getAliveTarget()
+    local targetFolder = getEnemiesFolder()
+    if not targetFolder then return nil end
+    
+    local fallbackEnemy = nil
+
+    for _, enemy in ipairs(targetFolder:GetChildren()) do
+        if enemy:IsA("Model") and enemy:FindFirstChild("HumanoidRootPart") then
+            local humanoid = enemy:FindFirstChildOfClass("Humanoid")
+            if not humanoid or humanoid.Health > 0 then
+                if selectedEnemyName == "ALL" or enemy.Name == selectedEnemyName then
+                    return enemy
+                end
+                if not fallbackEnemy then
+                    fallbackEnemy = enemy
+                end
+            end
+        end
+    end
+    return fallbackEnemy
+end
+
+local function getAliveChest()
+    local map = getMapFolder()
+    if map then
+        for _, obj in ipairs(map:GetChildren()) do
+            if string.find(obj.Name, "DungeonChest_") then
+                if not skippedChests[obj] then
+                    local targetPart = obj:FindFirstChild("Epic Chest Detailing 1 Plane") or obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+                    if targetPart then
+                        return targetPart, obj
+                    end
+                end
+            end
+        end
+    end
+    return nil, nil
+end
+
 local function getCombatRemote()
     local playerFolder = ReplicatedStorage:FindFirstChild("Player")
     if playerFolder then
         local remotes = playerFolder:FindFirstChild("Remotes")
-        if remotes then
-            local inputs = remotes:FindFirstChild("Inputs")
-            if inputs then
-                return inputs:FindFirstChild("Attack")
-            end
+        if remotes and remotes:FindFirstChild("Inputs") then
+            return remotes.Inputs:FindFirstChild("Attack")
         end
     end
     return nil
 end
 
--- Ambil Remote Skill
 local function getSkillRemote()
     local playerFolder = ReplicatedStorage:FindFirstChild("Player")
     if playerFolder then
         local remotes = playerFolder:FindFirstChild("Remotes")
-        if remotes then
-            local inputs = remotes:FindFirstChild("Inputs")
-            if inputs then
-                return inputs:FindFirstChild("Skill")
-            end
+        if remotes and remotes:FindFirstChild("Inputs") then
+            return remotes.Inputs:FindFirstChild("Skill")
         end
     end
     return nil
 end
 
--- ANTI FISIKA & ANTI TARIK
 local function setupAntiPhysics(char, status)
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -214,50 +260,87 @@ local function setupAntiPhysics(char, status)
     end
 end
 
--- CARI TARGET HIDUP
-local function getAliveTarget()
-    local targetFolder = getEnemiesFolder()
-    if targetFolder then
-        for _, enemy in ipairs(targetFolder:GetChildren()) do
-            if enemy:IsA("Model") and enemy:FindFirstChild("HumanoidRootPart") then
-                if selectedEnemyName == "ALL" or enemy.Name == selectedEnemyName then
-                    local humanoid = enemy:FindFirstChildOfClass("Humanoid")
-                    if not humanoid or humanoid.Health > 0 then
-                        return enemy
-                    end
-                end
-            end
-        end
-    end
-    return nil
-end
-
--- MOVEMENT LOOP
+-- MOVEMENT LOOP 
 local function startMovementLoop()
     if movementConnection then movementConnection:Disconnect() end
     
-    movementConnection = RunService.Heartbeat:Connect(function()
-        if isFarming and selectedEnemyName then
+    movementConnection = RunService.Heartbeat:Connect(function(deltaTime)
+        if isFarming then
             local char = LocalPlayer.Character
+            if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+            local myHRP = char.HumanoidRootPart
+            
+            local currentHeight = tonumber(HeightInput.Text) or defaultSpeedHeight
+            local currentLerpSpeed = tonumber(SpeedInput.Text) or defaultLerpSpeed
+            currentLerpSpeed = math.clamp(currentLerpSpeed, 0.001, 1)
+            
+            local targetPart = nil
+            local isTargetingChest = false
+            
+            -- 1. UTAMAKAN CARI MUSUH DULU
             local targetEnemy = getAliveTarget()
             
-            if char and char:FindFirstChild("HumanoidRootPart") and targetEnemy then
-                local myHRP = char.HumanoidRootPart
-                local targetHRP = targetEnemy:FindFirstChild("HumanoidRootPart")
+            if targetEnemy then
+                targetPart = targetEnemy:FindFirstChild("HumanoidRootPart")
+                currentChestTarget = nil
+                chestStuckTimer = 0
+            
+            -- 2. JIKA MUSUH HABIS, BARU CARI CHEST
+            elseif isAutoChest then
+                local chestPart, chestModel = getAliveChest()
                 
-                if targetHRP then
-                    local currentHeight = tonumber(HeightInput.Text) or defaultSpeedHeight
-                    local currentLerpSpeed = tonumber(SpeedInput.Text) or defaultLerpSpeed
-                    currentLerpSpeed = math.clamp(currentLerpSpeed, 0.001, 1)
-                    
-                    local targetPos = targetHRP.Position + Vector3.new(0, currentHeight, 0)
-                    local goalCFrame = CFrame.new(targetPos, targetHRP.Position)
-                    
-                    if currentLerpSpeed >= 1 then
-                        char:PivotTo(goalCFrame)
+                if chestPart then
+                    if currentChestTarget == chestModel then
+                        chestStuckTimer = chestStuckTimer + deltaTime
+                        
+                        -- Timeout 1 Detik
+                        if chestStuckTimer >= chestSkipTimeout then
+                            skippedChests[chestModel] = true 
+                            currentChestTarget = nil
+                            chestStuckTimer = 0
+                            return 
+                        end
                     else
-                        myHRP.CFrame = myHRP.CFrame:Lerp(goalCFrame, currentLerpSpeed)
+                        currentChestTarget = chestModel
+                        chestStuckTimer = 0
                     end
+                    targetPart = chestPart
+                    isTargetingChest = true
+                else
+                    currentChestTarget = nil
+                    chestStuckTimer = 0
+                end
+            end
+            
+            -- EKSEKUSI TELEPORT & AUTO-COLLECT BYPASS
+            if targetPart then
+                if isTargetingChest then
+                    currentHeight = 1 -- Fix Tinggi 1 di atas chest
+                    
+                    task.spawn(function()
+                        if currentChestTarget then
+                            for _, v in ipairs(currentChestTarget:GetDescendants()) do
+                                if v:IsA("ProximityPrompt") then
+                                    pcall(function() fireproximityprompt(v) end)
+                                end
+                                if firetouchinterest and v:IsA("BasePart") and v:FindFirstChild("TouchInterest") then
+                                    pcall(function()
+                                        firetouchinterest(myHRP, v, 0) 
+                                        firetouchinterest(myHRP, v, 1)
+                                    end)
+                                end
+                            end
+                        end
+                    end)
+                end
+                
+                local targetPos = targetPart.Position + Vector3.new(0, currentHeight, 0)
+                local goalCFrame = CFrame.new(targetPos, targetPart.Position)
+                
+                if currentLerpSpeed >= 1 then
+                    char:PivotTo(goalCFrame)
+                else
+                    myHRP.CFrame = myHRP.CFrame:Lerp(goalCFrame, currentLerpSpeed)
                 end
             end
         end
@@ -271,15 +354,17 @@ local function stopMovementLoop()
     end
 end
 
--- ATTACK & AUTO SKILL LOOP
+-- ATTACK & AUTO SKILL LOOP (FIX BUG MELAMUN)
 task.spawn(function()
     while true do
-        if isFarming and selectedEnemyName then
-            local targetEnemy = getAliveTarget()
+        if isFarming then
+            -- Fokus ke musuh (Cek target musuhnya langsung, ga peduli chest lagi on apa ngga)
+            local targetEnemy = getAliveTarget() 
             local combatRemote = getCombatRemote()
             local skillRemote = getSkillRemote()
             local char = LocalPlayer.Character
             
+            -- Kalau ketemu musuh, langsung BANTAI (karena movement juga pasti lagi ngejar musuh)
             if targetEnemy and char then
                 local myHRP = char:FindFirstChild("HumanoidRootPart")
                 local targetHRP = targetEnemy:FindFirstChild("HumanoidRootPart")
@@ -329,7 +414,7 @@ local function refreshDropdown()
         selectedEnemyName = "ALL"
         DropdownBtn.Text = "Target: ALL"
         DropdownList.Visible = false
-        MainFrame.Size = UDim2.new(0, 220, 0, 255)
+        MainFrame.Size = UDim2.new(0, 220, 0, 295)
     end)
     ySize = ySize + 30
     
@@ -356,7 +441,7 @@ local function refreshDropdown()
                         selectedEnemyName = enemy.Name
                         DropdownBtn.Text = "Target: " .. enemy.Name
                         DropdownList.Visible = false
-                        MainFrame.Size = UDim2.new(0, 220, 0, 255)
+                        MainFrame.Size = UDim2.new(0, 220, 0, 295)
                     end)
                     ySize = ySize + 30
                 end
@@ -370,14 +455,13 @@ end
 DropdownBtn.MouseButton1Click:Connect(function()
     DropdownList.Visible = not DropdownList.Visible
     if DropdownList.Visible then 
-        MainFrame.Size = UDim2.new(0, 220, 0, 375)
+        MainFrame.Size = UDim2.new(0, 220, 0, 415)
         refreshDropdown() 
     else
-        MainFrame.Size = UDim2.new(0, 220, 0, 255)
+        MainFrame.Size = UDim2.new(0, 220, 0, 295)
     end
 end)
 
--- Tombol Refresh List
 RefreshBtn.MouseButton1Click:Connect(function()
     refreshDropdown()
     RefreshBtn.Text = "✔"
@@ -411,15 +495,31 @@ AutoSkillBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- AUTO JALANKAN SAAT SCRIPT DI-EXECUTE
+-- UPDATE: TOMBOL AUTO CHEST (Clear Blacklist)
+AutoChestBtn.MouseButton1Click:Connect(function()
+    isAutoChest = not isAutoChest
+    if isAutoChest then
+        AutoChestBtn.Text = "AUTO CHEST: ON"
+        AutoChestBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        
+        -- Reset / Hapus Daftar Blacklist biar bisa coba ambil chest lagi dari awal
+        skippedChests = {}
+        currentChestTarget = nil
+        chestStuckTimer = 0
+    else
+        AutoChestBtn.Text = "AUTO CHEST: OFF"
+        AutoChestBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    end
+end)
+
 task.spawn(function()
     task.wait(1)
     setupAntiPhysics(LocalPlayer.Character, true)
     startMovementLoop()
 end)
 
--- RESET ANTI FISIKA JIKA MATI
 LocalPlayer.CharacterAdded:Connect(function(char)
+    skippedChests = {}
     if isFarming then
         task.wait(1) 
         setupAntiPhysics(char, true)
