@@ -1,0 +1,159 @@
+--========================================================--
+-- IRON SOUL - BOOTSTRAP (loader) for vmosa001-crypto/Local
+--
+-- Execute ONLY this file:
+--   loadstring(game:HttpGet("https://raw.githubusercontent.com/vmosa001-crypto/Local/main/bootstrap.lua?t=" .. os.time()))()
+--
+-- It prepares the shared globals every systems/*.lua module expects
+-- (IronSoulConfig / IronSoulLoadRaw / IronSoulStatus), opens the control
+-- panel, then routes this PlaceId to the right entry script:
+--   Lobby                -> systems/lobby.lua
+--   Cave1 / Cave2 / Cave3-> systems/combat.lua (redirects to cave.lua)
+--   Tutorial place       -> systems/tutorial.lua
+--   Any other place      -> systems/combat.lua (Story / Hell)
+--========================================================--
+
+local REPO = "vmosa001-crypto/Local"
+local BRANCH = "main"
+local BASE = "https://raw.githubusercontent.com/" .. REPO .. "/" .. BRANCH .. "/"
+
+local LOBBY_PLACE_ID = 117533937949084
+local CAVE_PLACE_IDS = {
+    [91584731222940] = true,
+    [119524374829397] = true,
+    [132445869992129] = true,
+}
+
+if not game:IsLoaded() then game.Loaded:Wait() end
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+while not LocalPlayer do
+    task.wait(0.1)
+    LocalPlayer = Players.LocalPlayer
+end
+
+--------------------------------------------------------------------
+-- shared globals
+--------------------------------------------------------------------
+getgenv().IronSoulRepo = REPO
+getgenv().IronSoulBase = BASE
+
+-- Defaults only fill missing keys, so values set by the user / UI always win.
+do
+    local defaults = {
+        FPS_CAP = 8,
+        FARM = "NEWBIE",
+        TICKETS = "SMART",
+        HEADLESS = true,
+        DEBUG_LOGS = false,
+    }
+    local cfg = getgenv().IronSoulConfig
+    if type(cfg) ~= "table" then
+        cfg = {}
+        getgenv().IronSoulConfig = cfg
+    end
+    for k, v in pairs(defaults) do
+        if cfg[k] == nil then cfg[k] = v end
+    end
+end
+
+getgenv().IronSoulTeleportQueueAvailable =
+    type(rawget(getgenv(), "queue_on_teleport")) == "function"
+    or type(queue_on_teleport) == "function"
+
+if type(rawget(getgenv(), "IronSoulStatus")) ~= "function" then
+    getgenv().IronSoulStatus = function(text)
+        print("[IronSoul]", tostring(text))
+    end
+end
+
+-- Fetch + run a file from this repo. Returns (ok, result) like pcall.
+-- Cache-busted so a 24/7 session always picks up the latest push.
+local function loadRaw(path)
+    path = tostring(path)
+    local okGet, source = pcall(function()
+        return game:HttpGet(BASE .. path .. "?t=" .. tostring(os.time()))
+    end)
+    if not okGet then
+        return false, "HTTP failed: " .. path .. " | " .. tostring(source)
+    end
+    if type(source) ~= "string" or source == "" or string.sub(source, 1, 3) == "404" then
+        return false, "not found: " .. path
+    end
+
+    local fn, err = loadstring(source, "=" .. path)
+    if not fn then
+        return false, "compile failed: " .. path .. " | " .. tostring(err)
+    end
+
+    return pcall(fn)
+end
+
+getgenv().IronSoulLoadRaw = loadRaw
+
+local function status(text)
+    local fn = getgenv().IronSoulStatus
+    if type(fn) == "function" then pcall(fn, "Boot | " .. tostring(text)) end
+    print("[IronSoul Boot]", tostring(text))
+end
+
+--------------------------------------------------------------------
+-- control panel first (so it is visible even if routing fails)
+--------------------------------------------------------------------
+do
+    local ok, err = loadRaw("systems/ui.lua")
+    if not ok then status("UI unavailable | " .. tostring(err)) end
+end
+
+do
+    local cap = tonumber(getgenv().IronSoulConfig.FPS_CAP)
+    if cap and type(setfpscap) == "function" then pcall(setfpscap, cap) end
+end
+
+--------------------------------------------------------------------
+-- routing
+--------------------------------------------------------------------
+local function looksLikeTutorial()
+    local override = tonumber(getgenv().IronSoulConfig.TUTORIAL_PLACE_ID)
+    if override then return game.PlaceId == override end
+
+    -- Heuristic: the tutorial place shows a "Skip" button shortly after load.
+    local deadline = os.clock() + 6
+    while os.clock() < deadline do
+        local gui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+        if gui then
+            for _, obj in ipairs(gui:GetDescendants()) do
+                if obj:IsA("TextButton") or obj:IsA("ImageButton") then
+                    local text = obj:IsA("TextButton") and obj.Text or ""
+                    if string.find(string.lower(obj.Name .. " " .. text), "skip", 1, true) then
+                        return true
+                    end
+                end
+            end
+        end
+        task.wait(0.5)
+    end
+    return false
+end
+
+local entry
+if game.PlaceId == LOBBY_PLACE_ID then
+    entry = "systems/lobby.lua"
+elseif CAVE_PLACE_IDS[game.PlaceId] then
+    entry = "systems/combat.lua"
+elseif (getgenv().IronSoulConfig.TUTORIAL_AUTO ~= false) and looksLikeTutorial() then
+    entry = "systems/tutorial.lua"
+else
+    entry = "systems/combat.lua"
+end
+
+status("PlaceId=" .. tostring(game.PlaceId) .. " -> " .. entry)
+
+local ok, result = loadRaw(entry)
+if not ok then
+    status("ERROR | " .. tostring(result))
+    warn("[IronSoul Boot] " .. tostring(result))
+end
+
+return result
