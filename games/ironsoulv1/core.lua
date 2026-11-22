@@ -1,0 +1,290 @@
+--------------------------------------------------------------------------------
+--// core.lua — S01 Services + S02 Engine Config & Konstanta
+--------------------------------------------------------------------------------
+local H = getgenv().Hub
+
+-- [S01] SERVICES & REMOTES
+--------------------------------------------------------------------------------
+local Services = setmetatable({}, {
+    __index = function(self, key)
+        local s = game:GetService(key)
+        if s then self[key] = s end; return s
+    end
+})
+
+local LocalPlayer  = Services.Players.LocalPlayer
+local Workspace    = Services.Workspace
+local TweenService = Services.TweenService
+
+-- [FIX FIRST-RUN CRASH] Semua WaitForChild di bawah dulu tanpa timeout — kalau
+-- script dieksekusi (autoexec/Xeno) sebelum game selesai stream objek-objek
+-- ini, thread akan hang selamanya dan script kelihatan "mati"/tidak jalan
+-- sama sekali di run pertama. Beri timeout wajar (15 detik) + pcall supaya
+-- kalaupun timeout, script lanjut jalan (fitur yang butuh remote itu saja
+-- yang gagal, bukan seluruh script).
+local function waitChain(root, ...)
+    local names = {...}
+    local ok, result = pcall(function()
+        local node = root
+        for _, name in ipairs(names) do
+            node = node:WaitForChild(name, 15)
+            if not node then error("timeout waiting for " .. name) end
+        end
+        return node
+    end)
+    if not ok then
+        warn("[XiFil] Remote tidak ditemukan (timeout): " .. table.concat(names, "/") .. " — " .. tostring(result))
+        return nil
+    end
+    return result
+end
+
+local PlayerActionRE = waitChain(Services.ReplicatedStorage, "Remotes", "PlayerActionRE")
+local GameRoundRE    = waitChain(Services.ReplicatedStorage, "Remotes", "GameRoundRE")
+local EquipmentRE    = waitChain(Services.ReplicatedStorage, "Framework", "Gameplay", "EquipmentSystem", "EquipmentRE")
+local ForgeRF        = waitChain(Services.ReplicatedStorage, "Framework", "Gameplay", "EquipmentSystem", "ForgeRF")
+local MaterialRE     = waitChain(Services.ReplicatedStorage, "Framework", "Gameplay", "EquipmentSystem", "MaterialUtil", "RemoteEvent")
+local WorldPlaceRE      = waitChain(Services.ReplicatedStorage, "Framework", "Gameplay", "WorldPlace", "WorldUtil", "RemoteEvent")
+local WorldBonusCardRE  = waitChain(Services.ReplicatedStorage, "Framework", "Gameplay", "WorldPlace", "WorldBonusCardUtil", "RemoteEvent")
+local GameMatchRE       = waitChain(Services.ReplicatedStorage, "Remotes", "GameMatchRE")
+local SeasonUtilRE   = waitChain(Services.ReplicatedStorage, "Framework", "Features", "SeasonSystem", "SeasonUtil", "RemoteEvent")
+
+
+--------------------------------------------------------------------------------
+-- [S02] ENGINE CONFIG & KONSTANTA
+--------------------------------------------------------------------------------
+
+local WORLD_NAMES = { "Starless Forest", "Frozen Valley", "Oathlost Castle", "Tartarus", "Endless Tower" }
+local WORLD_INDEX = { ["Starless Forest"]=1, ["Frozen Valley"]=2, ["Oathlost Castle"]=3, ["Tartarus"]=4, ["Endless Tower"]=5 }
+
+local POSITION_MODES = {
+    "Orbit Atas", "Orbit Bawah", "Orbit Samping",
+    "Diam Atas",  "Diam Bawah",  "Depan Target",
+    "Belakang Target", "Acak",
+}
+
+local ROOM_WORLD_DISPLAY = {
+    "Starless Forest", "Frozen Valley", "Oathlost Castle", "Tartarus", "Sakura Village",
+    "Cave of Crystal", "Cave of Runes", "Abandoned Courtyard",
+    "Endless Tower",
+}
+local ROOM_WORLD_KEY = {
+    ["Starless Forest"]     = "World1",
+    ["Frozen Valley"]       = "World2",
+    ["Oathlost Castle"]     = "World3",
+    ["Tartarus"]            = "World4",
+    ["Sakura Village"]      = "World5",
+    ["Cave of Crystal"]     = "Cave1",
+    ["Cave of Runes"]       = "Cave2",
+    ["Abandoned Courtyard"] = "Cave3",
+    ["Endless Tower"]       = "Endless1",
+}
+local function isCaveWorld(displayName)
+    return displayName == "Cave of Crystal"
+        or displayName == "Cave of Runes"
+        or displayName == "Abandoned Courtyard"
+end
+local function isEndlessTower(displayName)
+    return displayName == "Endless Tower"
+end
+
+local MODE_NAMES = {
+    [1]="Trial", [2]="Challenge", [3]="Penitent", [4]="Torment", [5]="Inferno",
+    [6]="Trial", [7]="Challenge", [8]="Penitent", [9]="Torment",[10]="Inferno",
+}
+local function getModeLabel(n) return n.." - "..(MODE_NAMES[n] or tostring(n)) end
+
+local EngineConfig = {
+    AutoFarmActive    = false,
+    FarmTargetMonster = false,
+    FarmTargetChest   = false,
+    FarmTargetEgg     = false,
+    -- Urutan prioritas target farm (tertinggi → terendah), dipisah koma. String supaya aman
+    -- disimpan/dimuat lewat JSON; selalu dibaca lewat H.GetFarmPriority() (divalidasi).
+    FarmPriority      = "Chest,Egg,Monster",
+    -- ── Dungeon / Tower / Pets (tab Room: sub tab Dungeon & Tower, tab Pets) ──
+    DgAutoStart     = false,       -- Auto Start Dungeon
+    DgWorldId       = "World3",    -- dungeon target
+    DgDifficulty    = 10,          -- level difficulty target
+    DgPlayerCount   = 1,           -- 1 Solo, 2 Duo, 3 Trio, 4 Quad
+    DgAutoUnlock    = false,       -- map terbaru, difficulty 1-5 (tanpa Hell)
+    DgAutoLatest    = false,       -- map terbaru, difficulty tertinggi terbuka (Hell ikut)
+    DgRepeatCount   = 0,           -- jumlah match; 0 = tanpa batas
+    DgFollowEnabled = false,       -- tunggu user tertentu ada di server
+    DgFollowUser    = "",
+    DgFollowDelay   = 5,
+    TwAuto          = false,       -- Auto Join Endless Tower (solo)
+    TwStartRound    = 0,           -- 0 = tertinggi yang terbuka
+    TwWeapon        = "",          -- UUID senjata ekstra; "" = damage tertinggi
+    PetHatchAuto    = false,       -- Auto Hatch telur
+    PetExpDispatch  = false,       -- Auto Dispatch ekspedisi
+    PetExpClaim     = false,       -- Auto Claim ekspedisi
+    PetExpSlots     = "2,3,4",     -- slot ekspedisi yang dipakai (dipisah koma)
+    AutoAttackOnly    = false,
+    AutoReplayActive  = false,
+    SelectedWorld     = "Starless Forest",
+    FarmMethod   = "CFrame",
+    FarmPosition = "Orbit Atas",
+    LerpAlpha    = 0.3,
+    StandHeight   = 20,
+    BossHeight    = 25,
+    OrbitRadius   = 12,
+    OrbitSpeed    = 5,
+    EndlessTowerHoverY = 35,   -- Y hover karakter saat menunggu wave baru di Endless Tower
+    ResetLockW4 = 2,           -- interval (detik) reset Y-lock World 4 (Tartarus)
+    ResetLockW5 = 3,           -- interval (detik) reset Y-lock World 5 (Endless Tower)
+    CFrameDelay   = 0.001,
+    HitMultiplier = 1,
+    -- Weapon yang dipilih di dropdown Tab 1 — menentukan berapa kali
+    -- BaseAttack di-fire ulang per kesempatan attack (terpisah dari
+    -- HitMultiplier). Lihat GetWeaponAttackLoops() di farm.lua.
+    SelectedWeapon = "Heavy",
+    IsLockDelay   = false,
+    AutoSkillActive    = false,
+    SkillActive1       = true,
+    SkillActive2       = true,
+    SkillActiveU       = true,
+    SkillActiveAW      = true,
+    SkillCooldownDelay = 0.5,
+    AutoWeaponSwitchActive = false,
+    PriorityNormalNpcIds = {},  -- map: npcId → bool (normal monster diprioritaskan)
+    PriorityBossNpcIds   = {},  -- map: npcId → bool (boss monster diprioritaskan)
+    SellCategory         = "All",
+    AutoSellStaticList   = {},
+    AutoSellScanActive   = false,
+    AutoSellScanInterval = 5,
+    AutoBuyActive     = false,
+    AutoBuyTargetList = {},
+    RoomWorldDisplay = "Starless Forest",
+    RoomModeType     = "Normal",
+    RoomMode         = 1,
+    RoomPlayers      = 4,
+    RoomTarget       = "Room1",
+    ForgeQTEBase          = 1,
+    ForgeQTEMultiplier    = 1,
+    ForgeFinishBase       = 1,
+    ForgeFinishMultiplier = 1,
+    ForgeResultBase       = 1,
+    ForgeResultMultiplier = 1,
+    FlyActive        = false,
+    FlySpeed         = 50,
+    AntiAFKActive    = false,
+    AntiPausedActive = false,
+    AutoExecuteOnRejoin   = false,
+    AutoReturnLobbyActive = false,
+    FriendOnlyRoom        = false,
+    AutoJoinRoomActive    = false,
+    SellByRarityActive   = false,
+    SellByRarityInterval = 0,   -- 0 = jual secepat inventory terdeteksi
+    SellByRarity         = "OFF",  -- threshold rarity: jual semua ore Rarity ≤ pilihan ini ("OFF"=tidak jual)
+    OreSellModes         = {},  -- per-ore override: OreId → "JUAL"|"SIMPAN"|nil (nil = ikut threshold)
+    -- ── Utilitas Tab ──────────────────────────────────────────────────────
+    -- Kunci disimpan eksplisit agar JSON encode/decode selalu lengkap.
+    UtilSelectedCodes    = {},   -- map: codeName → bool (kode mana yang dipilih)
+    UtilLotteryCount     = 15,   -- jumlah reroll lottery sekaligus
+    UtilAutoRerollActive = false, -- toggle auto reroll race
+    -- UtilRaceSlot tidak disimpan — dikelola sebagai variabel lokal di tab_util.lua
+    UtilTargetRaces      = {},   -- map: raceName → bool (target race yg dicari)
+    -- ── GUI Start Behavior ────────────────────────────────────────────────────
+    GuiStartHidden = false,  -- true = GUI tidak muncul otomatis; harus klik Floating Button
+    -- ── Dodge Dragon ───────────────────────────────────────────────────────────
+    DodgeDragonActive = false,  -- toggle auto-dodge skill Bom (BombRed)
+    -- ── Lock Position ──────────────────────────────────────────────────────────
+    LockPositionActive   = false,  -- toggle freeze posisi — CFrame karakter dikunci ke titik saat toggle ON
+    LockPositionInterval  = 0,      -- interval (detik) antar jendela ikut monster; 0 = nonaktif
+    LockPositionFollowDur = 1,      -- durasi (detik) jendela ikut monster setiap interval
+    -- ── Discord Webhook ────────────────────────────────────────────────────────
+    WebhookActive = false,   -- toggle on/off notifikasi ke Discord
+    WebhookUrl    = "",      -- URL webhook Discord yang diisi user
+    -- ── Auto Potion ───────────────────────────────────────────────────────────
+    AutoPotionActive   = false,         -- master toggle Auto Potion
+    AutoPotionSelected = {},            -- map: PotionId → bool (potion mana yang dipilih)
+}
+
+local GameLists = {
+    NormalNPCs     = {},  -- array of npcId (key untuk EngineConfig)
+    NormalNPCNames = {},  -- array of display name (paralel dengan NormalNPCs)
+    BossNPCs       = {},  -- array of npcId
+    BossNPCNames   = {},  -- array of display name
+}
+
+-- [FARM PRIORITY] Urutan prioritas target Auto Farm: Chest / Egg / Monster.
+-- Disimpan di EngineConfig.FarmPriority sebagai string "Chest,Egg,Monster" (tertinggi → terendah)
+-- agar ikut tersimpan & dimuat oleh ConfigSystem (JSON). Isi file config bisa saja rusak atau
+-- hasil edit manual, jadi SEMUA pembacaan harus lewat GetFarmPriority() yang selalu
+-- menghasilkan urutan valid (3 jenis, masing-masing tepat sekali).
+local FARM_PRIORITY_KINDS   = { "Chest", "Egg", "Monster" }
+local FARM_PRIORITY_DEFAULT = { "Chest", "Egg", "Monster" }   -- urutan lama = default
+local FARM_PRIORITY_LOOKUP  = { chest = "Chest", egg = "Egg", monster = "Monster" }
+
+-- Ubah nilai apa pun (string / tabel / nilai rusak) menjadi urutan valid. Nama tak dikenal
+-- dan duplikat dibuang; jenis yang hilang diisi menurut urutan default.
+local function NormalizeFarmPriority(value)
+    local order, seen = {}, {}
+    local function add(name)
+        if type(name) ~= "string" then return end
+        local kind = FARM_PRIORITY_LOOKUP[name:lower()]
+        if kind and not seen[kind] then
+            seen[kind] = true
+            order[#order + 1] = kind
+        end
+    end
+    if type(value) == "string" then
+        for token in value:gmatch("[^,%s>]+") do add(token) end
+    elseif type(value) == "table" then
+        for _, name in ipairs(value) do add(name) end
+    end
+    for _, kind in ipairs(FARM_PRIORITY_DEFAULT) do add(kind) end
+    return order
+end
+
+-- Urutan prioritas aktif. Array ini READ-ONLY (di-cache selama nilai config tidak berubah).
+local _farmPrioRaw, _farmPrioOrder = nil, nil
+local function GetFarmPriority()
+    local raw = EngineConfig.FarmPriority
+    if _farmPrioOrder == nil or not rawequal(raw, _farmPrioRaw) then
+        _farmPrioOrder = NormalizeFarmPriority(raw)
+        _farmPrioRaw   = raw
+    end
+    return _farmPrioOrder
+end
+
+-- Simpan urutan baru (otomatis dinormalisasi).
+local function SetFarmPriority(order)
+    EngineConfig.FarmPriority = table.concat(NormalizeFarmPriority(order), ",")
+end
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+-- Export ke Hub
+--------------------------------------------------------------------------------
+H.Services       = Services
+H.LocalPlayer    = LocalPlayer
+H.Workspace      = Workspace
+H.TweenService   = TweenService
+H.PlayerActionRE = PlayerActionRE
+H.GameRoundRE    = GameRoundRE
+H.EquipmentRE    = EquipmentRE
+H.ForgeRF        = ForgeRF
+H.MaterialRE     = MaterialRE
+H.WorldPlaceRE      = WorldPlaceRE
+H.WorldBonusCardRE  = WorldBonusCardRE
+H.GameMatchRE       = GameMatchRE
+H.SeasonUtilRE   = SeasonUtilRE
+H.EngineConfig   = EngineConfig
+H.FARM_PRIORITY_KINDS    = FARM_PRIORITY_KINDS
+H.NormalizeFarmPriority  = NormalizeFarmPriority
+H.GetFarmPriority        = GetFarmPriority
+H.SetFarmPriority        = SetFarmPriority
+H.GameLists      = GameLists
+H.WORLD_NAMES    = WORLD_NAMES
+H.WORLD_INDEX    = WORLD_INDEX
+H.POSITION_MODES = POSITION_MODES
+H.ROOM_WORLD_DISPLAY = ROOM_WORLD_DISPLAY
+H.ROOM_WORLD_KEY     = ROOM_WORLD_KEY
+H.MODE_NAMES         = MODE_NAMES
+H.isCaveWorld        = isCaveWorld
+H.isEndlessTower     = isEndlessTower
+H.getModeLabel       = getModeLabel
