@@ -14,7 +14,7 @@ end
 getgenv().XiFilHub_Executed = true
 getgenv().Hub = {}
 
-local BASE = "https://raw.githubusercontent.com/iNFINITE-iKII/Infinitee/main/games/ironsoulv1/"
+local BASE = "https://raw.githubusercontent.com/vmosa001-crypto/Local/main/games/ironsoulv1/"
 
 -- Urutan PENTING
 local MODULES = {
